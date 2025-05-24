@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Simple Web App</title>
+  <link rel="stylesheet" href="/styles.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  <h1>Task Manager</h1>
+  <form id="itemForm">
+    <input type="text" id="itemInput" placeholder="Add a new task..." required>
+    <button type="submit">Add</button>
+  </form>
+  <ul id="itemsList"></ul>
+
+  <script>
+    async function fetchItems() {
+      try {
+        const res = await fetch('/api/items');
+        const items = await res.json();
+        const list = document.getElementById('itemsList');
+        list.innerHTML = '';
+        
+        if (items.length === 0) {
+          list.innerHTML = '<p style="text-align: center; color: #888;">No tasks yet. Add one above!</p>';
+          return;
+        }
+        
+        items.forEach(item => {
+          const li = document.createElement('li');
+          li.className = 'item';
+          
+          // Format date
+          const date = new Date(item.date);
+          const formattedDate = date.toLocaleDateString();
+          
+          // Create item content
+          const itemContent = document.createElement('div');
+          itemContent.className = 'item-content';
+          
+          const nameSpan = document.createElement('span');
+          nameSpan.innerText = item.name;
+          if (item.completed) nameSpan.classList.add('completed');
+          
+          const dateSpan = document.createElement('span');
+          dateSpan.className = 'item-date';
+          dateSpan.innerText = formattedDate;
+          
+          itemContent.appendChild(nameSpan);
+          itemContent.appendChild(dateSpan);
+          
+          // Create action buttons
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'item-actions';
+          
+          const toggleBtn = document.createElement('button');
+          toggleBtn.className = 'toggle-btn';
+          toggleBtn.innerText = item.completed ? 'Undo' : 'Complete';
+          toggleBtn.onclick = () => toggleItem(item._id);
+          
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'delete-btn';
+          deleteBtn.innerText = 'Delete';
+          deleteBtn.onclick = () => deleteItem(item._id);
+          
+          actionsDiv.appendChild(toggleBtn);
+          actionsDiv.appendChild(deleteBtn);
+          
+          // Append all elements
+          li.appendChild(itemContent);
+          li.appendChild(actionsDiv);
+          list.appendChild(li);
+        });
+      } catch (err) {
+        console.error('Error fetching items:', err);
+      }
+    }
+
+    async function deleteItem(id) {
+      try {
+        await fetch(`/api/items/${id}`, {
+          method: 'DELETE'
+        });
+        fetchItems();
+      } catch (err) {
+        console.error('Error deleting item:', err);
+      }
+    }
+
+    async function toggleItem(id) {
+      try {
+        await fetch(`/api/items/${id}`, {
+          method: 'PUT'
+        });
+        fetchItems();
+      } catch (err) {
+        console.error('Error toggling item:', err);
+      }
+    }
+
+    document.getElementById('itemForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const itemInput = document.getElementById('itemInput');
+      const itemName = itemInput.value.trim();
+      
+      if (!itemName) return;
+      
+      try {
+        await fetch('/api/items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: itemName })
+        });
+        itemInput.value = '';
+        fetchItems();
+      } catch (err) {
+        console.error('Error adding item:', err);
+      }
+    });
+
+    // Initial load
+    fetchItems();
+  </script>
+</body>
+</html>
