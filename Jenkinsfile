@@ -99,9 +99,7 @@ pipeline {
                     }
                 }
             }
-        }
-
-        stage('Install Dependencies') {
+        }        stage('Install Dependencies') {
             steps {
                 echo 'Installing dependencies using Docker...'
                 script {
@@ -134,7 +132,9 @@ EOF
                     }
                 }
             }
-        }        stage('Unit Tests') {
+        }
+        
+        stage('Unit Tests') {
             steps {
                 echo 'Running Node.js unit tests...'
                 script {
@@ -148,9 +148,7 @@ EOF
                     }
                 }
             }
-        }
-
-        stage('Docker Build') {
+        }        stage('Docker Build') {
             steps {
                 echo 'Building Docker images...'
                 // Build the Selenium test image
@@ -159,7 +157,9 @@ EOF
                 // Build the webapp image
                 sh 'docker build -t ${DOCKER_IMAGE} -f Dockerfile.webapp .'
             }
-        }        stage('Setup Test Environment') {
+        }
+        
+        stage('Setup Test Environment') {
             steps {
                 echo 'Setting up test environment with Docker...'
                 
@@ -267,9 +267,7 @@ EOF
                     }
                 }
             }
-        }
-
-        stage('Build Production Image') {
+        }        stage('Build Production Image') {
             when {
                 anyOf {
                     branch 'main'
@@ -293,7 +291,9 @@ EOF
                 }
             }
         }
-    }    post {
+    }
+    
+    post {
         always {
             echo 'Cleaning up test environment...'
             sh '''
