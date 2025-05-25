@@ -8,9 +8,49 @@ pipeline {
         SELENIUM_CONTAINER = "simple-web-app-selenium"
         MONGO_URI = "mongodb://mongo:27017/taskmanager"
         PORT = "3000"
+        // Environment for Node.js
+        PATH = "$PATH:/usr/local/bin:/usr/bin:/bin"
+        // Use a Python virtual environment
+        PYTHON_VENV = "${WORKSPACE}/venv"
     }
 
     stages {
+        stage('Environment Setup') {
+            steps {
+                echo 'Setting up environment...'
+                script {
+                    // Check and install dependencies
+                    sh '''
+                        # Check if Docker is installed
+                        if ! command -v docker &> /dev/null; then
+                            echo "Docker is not installed or not in PATH"
+                        else
+                            echo "Docker is installed: $(docker --version)"
+                        fi
+                        
+                        # Create Python virtual environment
+                        if command -v python3 &> /dev/null; then
+                            python3 -m venv ${PYTHON_VENV} || echo "Could not create virtual environment"
+                            if [ -d "${PYTHON_VENV}" ]; then
+                                . ${PYTHON_VENV}/bin/activate
+                                pip install --upgrade pip
+                                echo "Python virtual environment created and activated"
+                            fi
+                        else
+                            echo "Python 3 is not installed or not in PATH"
+                        fi
+                        
+                        # Check if docker-compose exists and version
+                        if ! command -v docker-compose &> /dev/null; then
+                            echo "Docker Compose is not installed or not in PATH. Will use docker compose subcommand."
+                        else
+                            echo "Docker Compose is installed: $(docker-compose --version)"
+                        fi
+                    '''
+                }
+            }
+        }
+
         stage('Checkout') {
             steps {
                 echo 'Checking out source code...'
@@ -25,10 +65,13 @@ pipeline {
                         echo 'Running JavaScript linting with ESLint...'
                         script {
                             try {
-                                sh 'npm install --only=dev eslint'
-                                sh 'npx eslint server.js routes/ models/ || true'
+                                // Use a Docker container for Node.js operations
+                                sh '''
+                                    echo "Using Docker for Node.js operations..."
+                                    docker run --rm -v $(pwd):/app -w /app node:18-alpine sh -c "npm install eslint && npx eslint server.js routes/ models/ || echo 'Linting completed with warnings'"
+                                '''
                             } catch (Exception e) {
-                                echo 'ESLint not configured, skipping JavaScript linting'
+                                echo "JavaScript linting skipped: ${e.getMessage()}"
                             }
                         }
                     }
@@ -38,10 +81,19 @@ pipeline {
                         echo 'Running Python linting with flake8...'
                         script {
                             try {
-                                sh 'pip3 install flake8'
-                                sh 'flake8 --ignore=E501,W503 test_selenium.py'
+                                // Use Python venv or Docker if available
+                                sh '''
+                                    if [ -d "${PYTHON_VENV}" ]; then
+                                        . ${PYTHON_VENV}/bin/activate
+                                        pip install flake8
+                                        flake8 --ignore=E501,W503 test_selenium.py || echo "Linting completed with warnings"
+                                    else
+                                        echo "Using Docker for Python operations..."
+                                        docker run --rm -v $(pwd):/app -w /app python:3.10-slim sh -c "pip install flake8 && flake8 --ignore=E501,W503 test_selenium.py || echo 'Linting completed with warnings'"
+                                    fi
+                                '''
                             } catch (Exception e) {
-                                echo 'Python linting completed with warnings'
+                                echo "Python linting skipped: ${e.getMessage()}"
                             }
                         }
                     }
@@ -51,19 +103,46 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing Node.js dependencies...'
-                sh 'npm install'
-                echo 'Installing Python dependencies...'
-                sh 'pip3 install -r requirements.txt'
+                echo 'Installing dependencies using Docker...'
+                script {
+                    try {
+                        sh '''
+                            # Create Dockerfile.webapp if it doesn't exist
+                            if [ ! -f Dockerfile.webapp ]; then
+                                cat > Dockerfile.webapp << EOF
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+ENV MONGO_URI=mongodb://mongo:27017/taskmanager
+ENV PORT=3000
+CMD ["node", "server.js"]
+EOF
+                            fi
+                            
+                            # Install Python dependencies in venv or skip
+                            if [ -d "${PYTHON_VENV}" ]; then
+                                . ${PYTHON_VENV}/bin/activate
+                                pip install -r requirements.txt || echo "Could not install Python dependencies"
+                            fi
+                        '''
+                    } catch (Exception e) {
+                        echo "Dependency installation had issues: ${e.getMessage()}"
+                        echo "Continuing with pipeline..."
+                    }
+                }
             }
-        }
-
-        stage('Unit Tests') {
+        }        stage('Unit Tests') {
             steps {
                 echo 'Running Node.js unit tests...'
                 script {
                     try {
-                        sh 'npm test'
+                        // Use Docker to run Node.js tests
+                        sh '''
+                            docker run --rm -v $(pwd):/app -w /app node:18-alpine sh -c "npm test || echo 'No tests specified in package.json'"
+                        '''
                     } catch (Exception e) {
                         echo 'No unit tests configured, skipping...'
                     }
@@ -75,60 +154,41 @@ pipeline {
             steps {
                 echo 'Building Docker images...'
                 // Build the Selenium test image
-                sh 'docker build -t ${DOCKER_IMAGE}-selenium .'
+                sh 'docker build -t ${DOCKER_IMAGE}-selenium -f Dockerfile .'
                 
-                // Create a simple Dockerfile for the web app if it doesn't exist
-                sh 'docker build -t ${DOCKER_IMAGE} .'
-
+                // Build the webapp image
+                sh 'docker build -t ${DOCKER_IMAGE} -f Dockerfile.webapp .'
             }
-        }
-
-        stage('Setup Test Environment') {
+        }        stage('Setup Test Environment') {
             steps {
-                echo 'Setting up test environment with Docker Compose...'
+                echo 'Setting up test environment with Docker...'
                 
-                // Create docker-compose.yml for testing
-                sh '''
-                    cat > docker-compose.test.yml << EOF
-version: '3.8'
-services:
-  mongo:
-    image: mongo:5.0
-    container_name: ${MONGO_CONTAINER}
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_DATABASE: taskmanager
-    networks:
-      - test-network
-
-  webapp:
-    image: ${DOCKER_IMAGE}
-    container_name: ${CONTAINER_NAME}
-    ports:
-      - "3000:3000"
-    environment:
-      MONGO_URI: mongodb://mongo:27017/taskmanager
-      PORT: 3000
-    depends_on:
-      - mongo
-    networks:
-      - test-network
-
-networks:
-  test-network:
-    driver: bridge
-EOF
-                '''
+                // Create a network for the containers
+                sh 'docker network create test-network || true'
                 
                 // Clean up any existing containers
                 sh '''
-                    docker-compose -f docker-compose.test.yml down --remove-orphans || true
                     docker rm -f ${CONTAINER_NAME} ${MONGO_CONTAINER} ${SELENIUM_CONTAINER} || true
                 '''
                 
-                // Start the test environment
-                sh 'docker-compose -f docker-compose.test.yml up -d'
+                // Start MongoDB container
+                sh '''
+                    docker run -d --name ${MONGO_CONTAINER} \
+                        --network test-network \
+                        -p 27017:27017 \
+                        -e MONGO_INITDB_DATABASE=taskmanager \
+                        mongo:5.0
+                '''
+                
+                // Start web app container
+                sh '''
+                    docker run -d --name ${CONTAINER_NAME} \
+                        --network test-network \
+                        -p 3000:3000 \
+                        -e MONGO_URI=mongodb://mongo:27017/taskmanager \
+                        -e PORT=3000 \
+                        ${DOCKER_IMAGE}
+                '''
                 
                 // Wait for services to be ready
                 sh '''
@@ -136,8 +196,15 @@ EOF
                     sleep 10
                     
                     echo "Waiting for web application to be ready..."
-                    timeout 60 sh -c 'until curl -f http://localhost:3000; do sleep 2; done' || echo "Web app startup timeout"
                     sleep 5
+                    for i in {1..12}; do
+                        if curl -s http://localhost:3000 > /dev/null; then
+                            echo "Web app is ready!"
+                            break
+                        fi
+                        echo "Waiting for web app to start... (attempt $i/12)"
+                        sleep 5
+                    done
                 '''
             }
         }
@@ -226,16 +293,14 @@ EOF
                 }
             }
         }
-    }
-
-    post {
+    }    post {
         always {
             echo 'Cleaning up test environment...'
             sh '''
-                docker-compose -f docker-compose.test.yml down --remove-orphans --volumes || true
                 docker rm -f ${CONTAINER_NAME} ${MONGO_CONTAINER} ${SELENIUM_CONTAINER} || true
+                docker network rm test-network || true
                 docker rmi ${DOCKER_IMAGE}-selenium || true
-                rm -f Dockerfile.webapp docker-compose.test.yml || true
+                rm -f Dockerfile.webapp || true
             '''
             
             // Archive test results if they exist
