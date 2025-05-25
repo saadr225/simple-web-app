@@ -69,7 +69,8 @@ pipeline {
             steps {
                 sh '''
                     docker build -t selenium-test -f Dockerfile .
-                    docker run --rm --network host selenium-test
+                    docker run --rm --network host -e APP_URL=http://localhost:3000 selenium-test
+
                 '''
             }
         }
