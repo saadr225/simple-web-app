@@ -14,76 +14,71 @@ pipeline {
             }
         }
 
-        stage('Setup Python Virtual Env') {
+        stage('Python & JS Linting') {
+            parallel {
+                stage('Python Linting') {
+                    steps {
+                        sh '''
+                            python3 -m venv ${VENV_DIR}
+                            . ${VENV_DIR}/bin/activate
+                            pip install --upgrade pip flake8
+                            flake8 . || echo "flake8 warnings found"
+                        '''
+                    }
+                }
+                stage('Node.js Linting') {
+                    steps {
+                        sh '''
+                            if command -v npm &>/dev/null; then
+                                npm install
+                                if [ -f .eslintrc.js ] || [ -f .eslintrc.json ]; then
+                                    npx eslint . || echo "ESLint warnings"
+                                else
+                                    echo "ESLint not configured. Skipping JS linting."
+                                fi
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build Web App Docker Image') {
+            steps {
+                sh 'docker build -f Dockerfile.webapp -t webapp-image .'
+            }
+        }
+
+        stage('Run Web App Container') {
+            steps {
+                sh 'docker run -d -p 3000:3000 --name webapp-test webapp-image'
+            }
+        }
+
+        stage('Wait for Web App') {
             steps {
                 sh '''
-                    if command -v python3 &>/dev/null; then
-                        python3 -m venv ${VENV_DIR}
-                        . ${VENV_DIR}/bin/activate
-                        pip install --upgrade pip
-                        pip install flake8 || echo "flake8 install failed"
-                    else
-                        echo "Python3 not installed. Skipping Python linting."
-                    fi
+                    echo "Waiting for app to start..."
+                    sleep 10
+                    curl -f http://localhost:3000 || (echo "Web app not responding" && exit 1)
                 '''
             }
         }
 
-        stage('Python Linting') {
+        stage('Run Selenium Test Container') {
             steps {
                 sh '''
-                    if [ -x "${VENV_DIR}/bin/flake8" ]; then
-                        . ${VENV_DIR}/bin/activate
-                        flake8 . || echo "flake8 warnings found"
-                    else
-                        echo "flake8 not available, skipping."
-                    fi
+                    docker build -t selenium-test -f Dockerfile .
+                    docker run --rm --network host selenium-test
                 '''
             }
         }
 
-        stage('Node.js Linting') {
+        stage('Cleanup') {
             steps {
                 sh '''
-                    if command -v npm &>/dev/null; then
-                        npm install || echo "npm install failed"
-                        if [ -f .eslintrc.js ] || [ -f .eslintrc.json ]; then
-                            npx eslint . || echo "ESLint warnings"
-                        else
-                            echo "ESLint not configured. Skipping JS linting."
-                        fi
-                    else
-                        echo "npm not found, skipping JS linting"
-                    fi
-                '''
-            }
-        }
-
-        stage('Run Unit Tests') {
-            steps {
-                echo 'Skipping actual test logic for now.'
-                // Add your test commands here later
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                sh '''
-                    if command -v docker &>/dev/null; then
-                        docker build -t simple-web-app .
-                    else
-                        echo "Docker not found, skipping Docker build"
-                    fi
-                '''
-            }
-        }
-
-        stage('Post Cleanup') {
-            steps {
-                sh '''
-                    echo "Cleaning up..."
-                    docker ps -aq | xargs -r docker rm -f || true
-                    docker images -q | xargs -r docker rmi -f || true
+                    docker rm -f webapp-test || true
+                    docker rmi -f webapp-image selenium-test || true
                     rm -rf ${VENV_DIR}
                 '''
             }
@@ -94,13 +89,11 @@ pipeline {
         always {
             echo 'Pipeline complete.'
         }
-
-        failure {
-            echo 'Pipeline failed ❌'
-        }
-
         success {
             echo 'Pipeline succeeded ✅'
+        }
+        failure {
+            echo 'Pipeline failed ❌'
         }
     }
 }
