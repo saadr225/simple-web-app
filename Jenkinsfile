@@ -91,15 +91,16 @@ pipeline {
                                         echo "Using Docker for Python operations..."
                                         docker run --rm -v $(pwd):/app -w /app python:3.10-slim sh -c "pip install flake8 && flake8 --ignore=E501,W503 test_selenium.py || echo 'Linting completed with warnings'"
                                     fi
-                                '''
-                            } catch (Exception e) {
+                                '''                            } catch (Exception e) {
                                 echo "Python linting skipped: ${e.getMessage()}"
                             }
                         }
                     }
                 }
             }
-        }        stage('Install Dependencies') {
+        }
+
+        stage('Install Dependencies') {
             steps {
                 echo 'Installing dependencies using Docker...'
                 script {
@@ -141,14 +142,15 @@ EOF
                     try {
                         // Use Docker to run Node.js tests
                         sh '''
-                            docker run --rm -v $(pwd):/app -w /app node:18-alpine sh -c "npm test || echo 'No tests specified in package.json'"
-                        '''
+                            docker run --rm -v $(pwd):/app -w /app node:18-alpine sh -c "npm test || echo 'No tests specified in package.json'"                        '''
                     } catch (Exception e) {
                         echo 'No unit tests configured, skipping...'
                     }
                 }
             }
-        }        stage('Docker Build') {
+        }
+
+        stage('Docker Build') {
             steps {
                 echo 'Building Docker images...'
                 // Build the Selenium test image
@@ -263,11 +265,12 @@ EOF
                             echo "Load test completed"
                         '''
                     } catch (Exception e) {
-                        echo 'Performance tests completed with warnings'
-                    }
+                        echo 'Performance tests completed with warnings'                    }
                 }
             }
-        }        stage('Build Production Image') {
+        }
+
+        stage('Build Production Image') {
             when {
                 anyOf {
                     branch 'main'
