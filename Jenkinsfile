@@ -78,23 +78,8 @@ pipeline {
                 sh 'docker build -t ${DOCKER_IMAGE}-selenium .'
                 
                 // Create a simple Dockerfile for the web app if it doesn't exist
-                sh '''
-                    cat > Dockerfile.webapp << EOF
-FROM node:18-alpine
+                sh 'docker build -t ${DOCKER_IMAGE} .'
 
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm install
-
-COPY . .
-
-EXPOSE 3000
-
-CMD ["node", "server.js"]
-EOF
-                '''
-                sh 'docker build -f Dockerfile.webapp -t ${DOCKER_IMAGE} .'
             }
         }
 
